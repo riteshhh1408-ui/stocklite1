@@ -20,6 +20,10 @@ export default function InventoryTable({
     () => Array.from(new Set(products.map((p) => p.category))).sort(),
     [products],
   )
+  const lowStockCount = products.filter(
+  (p) => p.currentStock <= p.reorderThreshold,
+).length
+  
   const warehouseName = (id: string) =>
     warehouses.find((w) => w.id === id)?.name ?? id
 
@@ -46,6 +50,10 @@ export default function InventoryTable({
           <div className="value">{warehouses.length}</div>
           <div className="label">Warehouses</div>
         </div>
+        <div className="summary-tile">
+  <div className="value">{lowStockCount}</div>
+  <div className="label">Low stock items</div>
+</div>
         <div className="summary-tile">
           <div className="value">{categories.length}</div>
           <div className="label">Categories</div>
@@ -102,25 +110,34 @@ export default function InventoryTable({
               </tr>
             </thead>
             <tbody>
-              {visibleProducts.map((product) => {
-                const status = getStockStatus(product)
-                return (
-                  <tr key={product.id}>
-                    <td>{product.name}</td>
-                    <td>{product.category}</td>
-                    <td>{warehouseName(product.warehouseId)}</td>
-                    <td>{product.currentStock}</td>
-                    <td>{product.reorderThreshold}</td>
-                    <td>
-                      <StatusBadge
-                        status={status}
-                        label={getStockStatusLabel(status)}
-                      />
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
+  {visibleProducts.length === 0 ? (
+    <tr>
+      <td colSpan={6} style={{ textAlign: "center", padding: "20px" }}>
+        No inventory items match the selected filters.
+      </td>
+    </tr>
+  ) : (
+    visibleProducts.map((product) => {
+      const status = getStockStatus(product)
+
+      return (
+        <tr key={product.id}>
+          <td>{product.name}</td>
+          <td>{product.category}</td>
+          <td>{warehouseName(product.warehouseId)}</td>
+          <td>{product.currentStock}</td>
+          <td>{product.reorderThreshold}</td>
+          <td>
+            <StatusBadge
+              status={status}
+              label={getStockStatusLabel(status)}
+            />
+          </td>
+        </tr>
+      )
+    })
+  )}
+</tbody>
             </table>
           </div>
         )}
