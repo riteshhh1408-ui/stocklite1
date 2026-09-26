@@ -6,7 +6,11 @@ export const warehouses: Warehouse[] = [
     name: 'North Distribution Center',
     location: 'Elkridge, MD',
   },
-  { id: 'wh-south', name: 'South Fulfillment Hub', location: 'Waco, TX' },
+  {
+    id: 'wh-south',
+    name: 'South Fulfillment Hub',
+    location: 'Waco, TX',
+  },
 ]
 
 export const products: Product[] = [
@@ -247,7 +251,9 @@ export function recordTransaction(input: {
     timestamp: new Date().toISOString(),
     linkedTransactionId: input.linkedTransactionId,
   }
+
   transactions.push(tx)
+
   return tx
 }
 
@@ -270,6 +276,10 @@ export function applyStockMovement(
   direction: 'IN' | 'OUT',
 ): Product {
   const product = findProduct(productId)
+
+  if (!product) {
+    throw new Error('Product not found')
+  }
 
   if (!product) {
     throw new Error('Product not found')
@@ -299,37 +309,135 @@ export function applyStockMovement(
 // -------------------------------------------------------------------------
 // TASK 3 — Warehouse Transfer
 // -------------------------------------------------------------------------
-// This is intentionally incomplete AND buggy. Right now it:
-//   - does NOT validate source/destination warehouses, or check stock
-//   - only decrements the SOURCE product — it never adds the quantity to
-//     the destination warehouse (this is one of the Task 5 bugs: "a transfer
-//     that only updates one warehouse")
-//   - does NOT create a destination product row if one doesn't exist yet
-//   - does NOT log any transactions (no linked TRANSFER_OUT / TRANSFER_IN)
+// Warehouse transfer implementation.
 //
-// Participants must:
-//   1. Validate source !== destination
-//   2. Validate quantity is positive and <= source.currentStock
-//   3. Deduct from source AND add to destination
-//   4. Create a destination product row if the product doesn't exist there yet
-//   5. Apply fully or not at all (no partial writes if validation fails)
-//   6. Record a linked TRANSFER_OUT / TRANSFER_IN pair via recordTransaction
+// Rules:
+//   1. Source product must exist.
+//   2. Destination warehouse must exist.
+//   3. Source and destination must be different.
+//   4. Quantity must be positive and finite.
+//   5. Source warehouse must have sufficient stock.
+//   6. Destination product is found or created.
+//   7. Source stock is decreased.
+//   8. Destination stock is increased.
+//   9. A linked TRANSFER_OUT / TRANSFER_IN pair is recorded.
+//  10. Validation happens before stock is modified, preventing partial
+//      stock updates when the transfer is rejected.
 export function applyTransfer(
   productId: string,
   destWarehouseId: string,
   quantity: number,
 ): { source: Product; destination: Product } {
+  // -------------------------------------------------------------
+  // 1. Find the source product
+  // -------------------------------------------------------------
   const source = findProduct(productId)
-  if (!source) throw new Error('Source product not found')
 
-  // TODO: validate destWarehouseId !== source.warehouseId
-  // TODO: validate quantity (positive, finite, <= source.currentStock)
+  if (!source) {
+    throw new Error('Source product not found')
+  }
 
+  // -------------------------------------------------------------
+  // 2. Validate destination warehouse
+  // -------------------------------------------------------------
+  const destinationWarehouse = warehouses.find(
+    (warehouse) => warehouse.id === destWarehouseId,
+  )
+
+  if (!destinationWarehouse) {
+    throw new Error('Destination warehouse not found')
+  }
+
+  // -------------------------------------------------------------
+  // 3. Source and destination must be different
+  // -------------------------------------------------------------
+  if (source.warehouseId === destWarehouseId) {
+    throw new Error(
+      'Source and destination warehouses must be different',
+    )
+  }
+
+  // -------------------------------------------------------------
+  // 4. Validate quantity
+  // -------------------------------------------------------------
+  if (!Number.isFinite(quantity) || quantity <= 0) {
+    throw new Error('Quantity must be a positive number')
+  }
+
+  // -------------------------------------------------------------
+  // 5. Check sufficient source stock
+  //
+  // IMPORTANT:
+  // No stock has been changed before this check.
+  // Therefore, a failed transfer cannot partially update stock.
+  // -------------------------------------------------------------
+  if (quantity > source.currentStock) {
+    throw new Error('Insufficient stock in source warehouse')
+  }
+
+  // -------------------------------------------------------------
+  // 6. Find the matching product in the destination warehouse
+  // -------------------------------------------------------------
+  let destination = products.find(
+    (product) =>
+      product.warehouseId === destWarehouseId &&
+      product.name === source.name &&
+      product.category === source.category,
+  )
+
+  // -------------------------------------------------------------
+  // 7. Create destination product if it does not exist
+  // -------------------------------------------------------------
+  if (!destination) {
+    destination = {
+      ...source,
+      id: `${source.id}-${destWarehouseId}`,
+      warehouseId: destWarehouseId,
+      currentStock: 0,
+    }
+
+    products.push(destination)
+  }
+
+  // -------------------------------------------------------------
+  // 8. Apply the stock movement
+  // -------------------------------------------------------------
   source.currentStock -= quantity
+  destination.currentStock += quantity
 
-  // BUG: destination is never found/created/incremented.
-  // TODO: find or create the destination product row, then add quantity to it
-  // TODO: record linked TRANSFER_OUT / TRANSFER_IN transactions
+  // -------------------------------------------------------------
+  // 9. Record TRANSFER_OUT transaction
+  // -------------------------------------------------------------
+  const transferOut = recordTransaction({
+    productId: source.id,
+    productName: source.name,
+    warehouseId: source.warehouseId,
+    type: 'TRANSFER_OUT',
+    quantity,
+  })
 
-  return { source, destination: source }
+  // -------------------------------------------------------------
+  // 10. Record TRANSFER_IN transaction
+  // -------------------------------------------------------------
+  const transferIn = recordTransaction({
+    productId: destination.id,
+    productName: destination.name,
+    warehouseId: destination.warehouseId,
+    type: 'TRANSFER_IN',
+    quantity,
+    linkedTransactionId: transferOut.id,
+  })
+
+  // -------------------------------------------------------------
+  // 11. Link TRANSFER_OUT back to TRANSFER_IN
+  // -------------------------------------------------------------
+  transferOut.linkedTransactionId = transferIn.id
+
+  // -------------------------------------------------------------
+  // 12. Return both updated products
+  // -------------------------------------------------------------
+  return {
+    source,
+    destination,
+  }
 }

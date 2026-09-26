@@ -55,7 +55,33 @@ export default function TransferForm({
 
     const parsedQuantity = Number(quantity)
 
-    setSubmitting(true)
+if (sourceWarehouseId === destWarehouseId) {
+  setError('Source and destination warehouses must be different.')
+  return
+}
+
+if (!productId) {
+  setError('Please select a product.')
+  return
+}
+
+if (!Number.isFinite(parsedQuantity) || parsedQuantity <= 0) {
+  setError('Quantity must be a positive number.')
+  return
+}
+
+if (!selectedProduct) {
+  setError('Selected product was not found.')
+  return
+}
+
+if (parsedQuantity > selectedProduct.currentStock) {
+  setError('Insufficient stock in source warehouse.')
+  return
+}
+
+setSubmitting(true)
+
     try {
       const res = await fetch('/api/items', {
         method: 'POST',
@@ -73,10 +99,28 @@ export default function TransferForm({
         return
       }
 
-      // TODO: update `products` state with data.source and data.destination
+      setProducts((currentProducts) => {
+  const updatedProducts = currentProducts.map((product) => {
+    if (product.id === data.source.id) {
+      return data.source
+    }
+
+    if (product.id === data.destination.id) {
+      return data.destination
+    }
+
+    return product
+  })
+
+  if (!currentProducts.some((product) => product.id === data.destination.id)) {
+    updatedProducts.push(data.destination)
+  }
+
+  return updatedProducts
+})
 
       setSuccess(
-        `Transferred ${parsedQuantity} unit${parsedQuantity === 1 ? '' : 's'} of ${data.source.name} to the destination warehouse.`,
+        `Transferred ${parsedQuantity} unit${parsedQuantity === 1 ? '' : 's'} of${data.source.name} to the destination warehouse.`,
       )
       setQuantity('')
     } catch {
